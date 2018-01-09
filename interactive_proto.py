@@ -6,10 +6,9 @@ import stream
 
 
 async def process_in_term(queue, loop):
-    process = await asyncio.create_subprocess_exec(*["xterm", "-e", "./example.sh"])
+    process = await asyncio.create_subprocess_exec(*["xterm", "-e", "./echoist.sh", "oui"])
 
-    go_on = True;
-    while (go_on):
+    while True:
         done, pending = await asyncio.wait( [
                 process.wait(), 
                 queue.get(),
@@ -17,14 +16,24 @@ async def process_in_term(queue, loop):
             return_when=asyncio.FIRST_COMPLETED,
             loop = loop,
         )
-        print("Done: {} of type {}".format(done, type(done)))
+        result = done.pop().result();
+        if type(result) is Command:
+            process.terminate();
+            process = await asyncio.create_subprocess_exec(*["xterm", "-e", "./echoist.sh", result.value])
+        else:
+            print("Process externally closed")
+            return;
+
+
+class Command():
+    def __init__(self, value):
+        self.value = value
 
 
 async def interact(queue, loop):
-    while (True):
+    while True:
         read = await stream.ainput(prompt="Script: ", loop=loop),
-        print("Received {} of type {}".format(read, type(read)))
-        queue.put_nowait(read[0])
+        queue.put_nowait(Command(read[0]))
 
 
 async def wait_approach(loop):
