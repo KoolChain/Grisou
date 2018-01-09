@@ -13,7 +13,7 @@ async def process_in_term():
 
 async def interact():
     read = await stream.ainput(prompt="Koi", loop=loop),
-    print("Received {}".format(read))
+    print("Received {} of type {}".format(read, type(read)))
 
 
 if __name__ == "__main__":
