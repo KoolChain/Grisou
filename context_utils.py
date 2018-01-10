@@ -33,7 +33,7 @@ if __name__ == '__main__':
             return False
 
         def __repr__(self):
-            return f'<Mark {self.mark}>'
+            return f'<Context {self.mark}>'
 
     with AllContexts(Context('a'), Context('b'), Context('c')) as ctxs:
         print(f'Current contexts: {ctxs}')
