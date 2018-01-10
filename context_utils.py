@@ -10,10 +10,10 @@ class AllContexts(object):
         """Exit all contexts and suppress exception
         if any context wants to suppress it.
         """
-        return any(
+        return any([
             ctx.__exit__(exc_type, exc_value, traceback)
             for ctx in reversed(self.contexts)
-        )
+        ])
 
 
 if __name__ == '__main__':
