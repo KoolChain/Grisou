@@ -23,7 +23,7 @@ class Process:
         self.terminate_event = asyncio.Event()
 
     async def async_run(self, command):
-        self.command_line = ["xterm", "-e", command]
+        self.command_line = ["xterm", "-hold", "-e", command]
         await self._create_process()
         while True:
             done, pending = await asyncio.wait([self.process.wait(), self.terminate_event.wait()],
@@ -37,6 +37,7 @@ class Process:
                 return
 
             print("Process externally closed, relaunch it")
+            await asyncio.sleep(2)
             await self._create_process()
 
     def terminate(self):
@@ -54,6 +55,11 @@ class MiningApp:
     def get_command(self, **config):
         return self.command.format(**config)
 
+
+#class EchoApp(MiningApp):
+#    def __init__(self):
+#        super().__init__("./echoist.sh {wallet}")
+        
 
 class Request():
     def __init__(self, action, workers, currency):
@@ -170,25 +176,14 @@ if __name__ == "__main__":
                         help='Number of workers to start')
     parser.add_argument('--config', default="currencies.json",
                         help='The currencies config file')
+    parser.add_argument('--applications', default="applications.json",
+                        help='The applications config file')
     args = parser.parse_args()
 
-    #currencies = json.load(open(args.config))
+    mining_configs = json.load(open(args.config))
 
-    mining_apps = {
-        "XMR": MiningApp("./echoist.sh {pool}"),
-        "HUSH": MiningApp("./echoist.sh {wallet}"),
-    }
-
-    mining_configs = {
-        "XMR" : {
-            "pool": "leXMRpool",
-            "wallet":"leXMRwallet"
-        },
-        "HUSH" : {
-            "pool": "leHUSHpool",
-            "wallet":"leHUSHwallet"
-        },
-    }
+    apps = json.load(open(args.applications))
+    mining_apps = {key: MiningApp(path) for (key, path) in apps.items()}
 
     workers = [Worker(i) for i in range(args.worker_count)]
     prompt = CommandPrompt(workers)

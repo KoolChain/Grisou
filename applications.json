@@ -1,0 +1,4 @@
+{
+    "XMR": "./echoist.sh {pool}",
+    "HUSH": "./echoist.sh {wallet}"
+}

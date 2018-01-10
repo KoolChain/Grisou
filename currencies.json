@@ -1,0 +1,10 @@
+{
+    "XMR" : {
+        "pool": "leXMRpool",
+        "wallet":"leXMRwallet"
+    },
+    "HUSH" : {
+        "pool": "leHUSHpool",
+        "wallet":"leHUSHwallet"
+    }
+}
