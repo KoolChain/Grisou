@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+
 from context_utils import AllContexts 
 
 import stream
@@ -55,7 +56,8 @@ class MiningApp:
 
 
 class Request():
-    def __init__(self, workers, currency):
+    def __init__(self, action, workers, currency):
+        self.action = action
         self.workers = workers
         self.currency = currency
 
@@ -65,18 +67,33 @@ class Worker:
         self.device_id = device_id
         self.command_queue = asyncio.Queue()
         self.process = None
+        self.last_mine_request = None
         asyncio.ensure_future(self._async_mine())
     
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if self.process:
-            self.process.terminate()
+        self._stop()
         return False
 
     def mine(self, mining_app, currency_config):
-        self.command_queue.put_nowait((mining_app, currency_config))
+        self.last_mine_request = (mining_app, currency_config)
+        self.command_queue.put_nowait(self.last_mine_request)
+
+    def pause(self):
+        self._stop()
+
+    def resume(self):
+        if self.last_mine_request:
+            self.command_queue.put_nowait(self.last_mine_request)
+        else:
+            print("Cannot resume a worker that never ran.")
+
+    def _stop(self):
+        if self.process:
+            self.process.terminate()
+            self.process = None
 
     async def _async_mine(self):
         while True:
@@ -100,25 +117,49 @@ class CommandPrompt:
         self.workers = workers
 
     def _get_workers(self, read):
-        # TODO
-        return self.workers
+        ids = read.split()[1:]
+        if not ids:
+            return self.workers
+        else:
+            result = []
+            try:
+                result = [self.workers[int(i)] for i in ids]
+            except ValueError:
+                print("Worker index must be an integer, ignoring request")
+            except IndexError:
+                print("Worker index out of range, ignoring request")
+            return result
+
+    def _get_verb(self, read):
+        return read.split()[0]
 
     def _get_currency(self, read):
-        # TODO
-        return read
+        return read.split()[0].upper()
 
     async def interact(self):
         read = await stream.ainput(prompt="Request: ")
-        return Request(self._get_workers(read), self._get_currency(read))
+        verb = self._get_verb(read)
+        if verb == "pause" or verb == "resume":
+            return Request(verb, self._get_workers(read), None)
+        else:
+            return Request("mine", self._get_workers(read), self._get_currency(read))
 
 
 async def async_interact_loop(prompt, currency_to_app, currency_to_config):
     while True:
         request = await prompt.interact()
         try:
+            if request.action == "pause":
+                func = lambda worker: worker.pause()
+            elif request.action == "resume":
+                func = lambda worker: worker.resume()
+            else:
+                func = lambda worker: worker.mine(currency_to_app[request.currency],
+                                                  currency_to_config[request.currency])
+
             for worker in request.workers:
-                worker.mine(currency_to_app[request.currency],
-                            currency_to_config[request.currency])
+                func(worker)
+
         except KeyError as e:
             print("Currency {} not available.".format(request.currency))
 
