@@ -8,6 +8,7 @@ import stream
 import argparse
 import asyncio
 import json
+import platform
 
 
 class NullSystemProcess:
@@ -22,8 +23,17 @@ class Process:
     def __init__(self):
         self.terminate_event = asyncio.Event()
 
+    def _platform_terminal_launch(self, command):
+        name = platform.system()
+        if name.startswith("Windows") or name.startswith("CYGWIN"):
+            return ["cmd", "/k", command]
+        elif name == "Linux":
+            return ["xterm", "-hold", "-e", command]
+        else:
+            raise Exception("Unsupported platform")
+
     async def async_run(self, command):
-        self.command_line = ["xterm", "-hold", "-e", command]
+        self.command_line = self._platform_terminal_launch(command)
         await self._create_process()
         while True:
             done, pending = await asyncio.wait([self.process.wait(), self.terminate_event.wait()],
