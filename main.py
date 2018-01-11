@@ -9,6 +9,8 @@ import argparse
 import asyncio
 import json
 import platform
+import subprocess
+import sys
 
 
 class NullSystemProcess:
@@ -23,36 +25,55 @@ class Process:
     def __init__(self):
         self.terminate_event = asyncio.Event()
 
-    def _platform_terminal_launch(self, command):
+    def _platform_terminal_launch(self, title, command):
         name = platform.system()
-        if name.startswith("Windows") or name.startswith("CYGWIN"):
-            return ["cmd", "/k", command]
+        if name.startswith("Windows"):
+            # 'start' is a builtin command of cmd shell
+            return ["cmd", "/c", "start", "/wait", "cmd.exe", "/k", "TITLE {} & {}".format(title, command)]
+        elif name.startswith("CYGWIN"):
+            # -w to wait until started process terminates
+            return ["cygstart", "-w", "cmd.exe", "/k", "\"TITLE {} & {}\"".format(title, command)]
         elif name == "Linux":
             return ["xterm", "-hold", "-e", command]
         else:
             raise Exception("Unsupported platform")
 
-    async def async_run(self, command):
-        self.command_line = self._platform_terminal_launch(command)
-        await self._create_process()
-        while True:
-            done, pending = await asyncio.wait([self.process.wait(), self.terminate_event.wait()],
-                                               return_when=asyncio.FIRST_COMPLETED,
-            )
-            # To raise potential exception
-            result = done.pop().result()
+    def _platform_terminate(self):
+        name = platform.system()
+        if name.startswith("Windows") or name.startswith("CYGWIN"):
+            # see: https://stackoverflow.com/a/42933315/1027706
+            # Uses subprocess, terminate should remain a synchronous operation
+            searchfilter = "WINDOWTITLE eq {}*".format(self.title) 
+            # Piping stdout so it does not show up in the terminal output
+            subprocess.run(["TASKKILL", "/fi", searchfilter, "/t", "/f"], stdout=subprocess.PIPE)
+        elif name == "Linux":
+            self.process.terminate()
 
-            if self.terminate_event.is_set():
-                self.terminate_event.clear()
-                return
-
-            print("Process externally closed, relaunch it")
-            await asyncio.sleep(2)
+    async def async_run(self, title, command):
+        try:
+            self.title = title
+            self.command_line = self._platform_terminal_launch(title, command)
             await self._create_process()
+            while True:
+                done, pending = await asyncio.wait([self.process.wait(), self.terminate_event.wait()],
+                                                   return_when=asyncio.FIRST_COMPLETED,
+                )
+                # To raise potential exception
+                result = done.pop().result()
+
+                if self.terminate_event.is_set():
+                    self.terminate_event.clear()
+                    return
+
+                print("Process externally closed, relaunch it")
+                await asyncio.sleep(2)
+                await self._create_process()
+        except Exception as e:
+            print("Exception in Process::async_run(): {}".format(e))
 
     def terminate(self):
         self.terminate_event.set()
-        self.process.terminate()
+        self._platform_terminate()
 
     async def _create_process(self):
         self.process = await asyncio.create_subprocess_exec(*self.command_line)
@@ -124,7 +145,8 @@ class Worker:
                 self.process = Process()
 
             self.process_future = asyncio.ensure_future(
-                self.process.async_run(mining_app.get_command(device_id = self.device_id,
+                self.process.async_run("Grisou worker on device #{}".format(self.device_id),
+                                        mining_app.get_command(device_id = self.device_id,
                                                               **currency_config)))
 
 
@@ -188,7 +210,15 @@ if __name__ == "__main__":
                         help='The currencies config file')
     parser.add_argument('--applications', default="applications.json",
                         help='The applications config file')
+    parser.add_argument('--debug', action="store_true",
+                        help='Debug mode notably enables the event loop debug mode')
     args = parser.parse_args()
+
+    # Must be done before any use of the loop (notably ensure_future)
+    if sys.platform == 'win32':
+        if (args.debug):
+            print("[DEBUG] Detected Win32, installs proactor event loop.")
+        asyncio.set_event_loop(asyncio.ProactorEventLoop())
 
     mining_configs = json.load(open(args.config))
 
@@ -196,10 +226,11 @@ if __name__ == "__main__":
     mining_apps = {key: MiningApp(path) for (key, path) in apps.items()}
 
     workers = [Worker(i) for i in range(args.worker_count)]
+
     prompt = CommandPrompt(workers)
 
     loop = asyncio.get_event_loop()
-    loop.set_debug(True)
+    loop.set_debug(args.debug)
 
     with AllContexts(*workers):
         top_async = async_interact_loop(prompt, mining_apps, mining_configs) 
